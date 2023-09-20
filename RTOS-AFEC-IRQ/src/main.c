@@ -35,6 +35,8 @@ TimerHandle_t xTimer;
 /** Queue for msg log send data */
 QueueHandle_t xQueueADC;
 
+QueueHandle_t xQueueMedia;
+
 typedef struct {
   uint value;
 } adcData;
@@ -85,7 +87,7 @@ static void AFEC_pot_callback(void) {
   adcData adc;
   adc.value = afec_channel_get_value(AFEC_POT, AFEC_POT_CHANNEL);
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xQueueSendFromISR(xQueueADC, &adc, &xHigherPriorityTaskWoken);
+  xQueueSendFromISR(xQueueMedia, &adc, &xHigherPriorityTaskWoken);
 }
 
 /************************************************************************/
@@ -101,7 +103,7 @@ void vTimerCallback(TimerHandle_t xTimer) {
 static void task_adc(void *pvParameters) {
 
   // configura ADC e TC para controlar a leitura
-  config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_callback);
+  
 
   xTimer = xTimerCreate(/* Just a text name, not used by the RTOS
                         kernel. */
@@ -124,12 +126,59 @@ static void task_adc(void *pvParameters) {
   adcData adc;
 
   while (1) {
+	  
+	 
+	
     if (xQueueReceive(xQueueADC, &(adc), 1000)) {
       printf("ADC: %d \n", adc.value);
     } else {
       printf("Nao chegou um novo dado em 1 segundo");
     }
   }
+}
+
+static void  task_proc(void *pvParameters){
+	
+	 
+	 // Configura o Afec para gerar interrupções
+	 config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_callback);
+	 
+	 xTimer = xTimerCreate(/* Just a text name, not used by the RTOS
+                        kernel. */
+                        "Timer",
+                        /* The timer period in ticks, must be
+                        greater than 0. */
+                        100,
+                        /* The timers will auto-reload themselves
+                        when they expire. */
+                        pdTRUE,
+                        /* The ID is used to store a count of the
+                        number of times the timer has expired, which
+                        is initialised to 0. */
+                        (void *)0,
+                        /* Timer callback */
+                        vTimerCallback);
+	 xTimerStart(xTimer, 0);
+	 adcData adc;
+	 BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+	 
+	   while (1) {
+		    int n = 0;
+		    int media = 0;
+		    int dados = 0;
+		    while(n<10){
+			    if (xQueueReceive(xQueueMedia, &(adc), 1000)) {
+				    media+= adc.value;
+			    }
+			    n++;
+		    }
+		    dados = (int)media/10;
+			adc.value = dados;
+		   xQueueSendFromISR(xQueueADC, &(adc), &xHigherPriorityTaskWoken);
+
+	   }
+	
+	
 }
 
 /************************************************************************/
@@ -214,12 +263,21 @@ int main(void) {
   configure_console();
 
   xQueueADC = xQueueCreate(100, sizeof(adcData));
+
   if (xQueueADC == NULL)
     printf("falha em criar a queue xQueueADC \n");
+	
+	xQueueMedia = xQueueCreate(100, sizeof(adcData));
+  if (xQueueMedia == NULL)
+  printf("falha em criar a queue xQueueADC \n");
 
   if (xTaskCreate(task_adc, "ADC", TASK_ADC_STACK_SIZE, NULL,
                   TASK_ADC_STACK_PRIORITY, NULL) != pdPASS) {
     printf("Failed to create test ADC task\r\n");
+  }
+  if (xTaskCreate(task_proc, "Media", TASK_ADC_STACK_SIZE, NULL,
+  TASK_ADC_STACK_PRIORITY, NULL) != pdPASS) {
+	  printf("Failed to create test ADC task\r\n");
   }
 
   vTaskStartScheduler();
